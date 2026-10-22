@@ -4,6 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>The Club</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=UnifrakturCook:wght@700&display=swap" />
   <link rel="stylesheet" href="style.css" />
   <script type="importmap">
     { "imports": {
@@ -22,20 +25,35 @@
       <span id="count">0 in the club</span>
       <button id="sound" class="pill">🔇 Tap for sound</button>
       <input id="volume" type="range" min="0" max="1" step="0.05" value="0.5" aria-label="Volume" />
+      <button id="crowdBtn" class="pill" hidden>Crowd</button>
     </div>
+    <div id="toast" role="status" hidden></div>
     <div id="actions">
       <div id="dances"></div>
       <div id="emotes"></div>
     </div>
     <div id="help">WASD / arrows or tap the floor to walk · drag to look around · 1-5 dance · Q-I emotes</div>
     <div id="joystick"><div id="stick"></div></div>
+
+    <!-- DJ only: options for the person you tapped -->
+    <div id="djMenu" class="panel" hidden>
+      <div class="panel-head"><span id="djName"></span><button id="djClose" class="x" aria-label="Close">✕</button></div>
+      <button id="djStage" class="opt"></button>
+      <button id="djVip" class="opt"></button>
+    </div>
+
+    <!-- DJ only: everyone in the club -->
+    <div id="crowd" class="panel" hidden>
+      <div class="panel-head"><span>Crowd</span><button id="crowdClose" class="x" aria-label="Close">✕</button></div>
+      <input id="crowdSearch" placeholder="Search names" />
+      <ul id="crowdList"></ul>
+    </div>
   </div>
 
   <div id="login" class="overlay">
     <div class="card">
       <h1>The Club</h1>
       <p id="subtitle">Come dance while the DJ plays live.</p>
-      <label class="color-row">Your color <input id="color" type="color" value="#7c5cff" /></label>
       <button id="twitchLogin" class="big twitch" hidden>Log in with Twitch</button>
       <div id="guestBox" hidden>
         <input id="guestName" maxlength="20" placeholder="Pick a name" />
