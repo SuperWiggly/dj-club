@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>The Club</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    } }
+  </script>
+</head>
+<body>
+  <!-- The Twitch player lives in this layer, positioned in 3D behind the booth. -->
+  <div id="css3d"></div>
+  <canvas id="scene"></canvas>
+
+  <div id="hud" hidden>
+    <div id="topbar">
+      <span id="count">0 in the club</span>
+      <button id="sound" class="pill">🔇 Tap for sound</button>
+      <input id="volume" type="range" min="0" max="1" step="0.05" value="0.5" aria-label="Volume" />
+    </div>
+    <div id="actions">
+      <div id="dances"></div>
+      <div id="emotes"></div>
+    </div>
+    <div id="help">WASD / arrows or tap the floor to walk · drag to look around · 1-5 dance · Q-I emotes</div>
+    <div id="joystick"><div id="stick"></div></div>
+  </div>
+
+  <div id="login" class="overlay">
+    <div class="card">
+      <h1>The Club</h1>
+      <p id="subtitle">Come dance while the DJ plays live.</p>
+      <label class="color-row">Your color <input id="color" type="color" value="#7c5cff" /></label>
+      <button id="twitchLogin" class="big twitch" hidden>Log in with Twitch</button>
+      <div id="guestBox" hidden>
+        <input id="guestName" maxlength="20" placeholder="Pick a name" />
+        <button id="guestJoin" class="big">Join as guest</button>
+      </div>
+      <p id="error" role="alert"></p>
+    </div>
+  </div>
+
+  <script src="https://embed.twitch.tv/embed/v1.js"></script>
+  <script type="module" src="club.js"></script>
+</body>
+</html>
