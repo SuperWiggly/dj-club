@@ -16,7 +16,9 @@ const ALLOW_GUESTS = process.env.ALLOW_GUESTS
 
 const TICK_MS = 100; // how often positions are sent out (10 times a second)
 const ROOM = { minX: -14, maxX: 14, minZ: -9, maxZ: 13 }; // walkable floor
-const STAGE = { minX: -5, maxX: 5, minZ: -9, maxZ: -5 }; // only the DJ may stand here
+const STAGE = { minX: -5, maxX: 5, minZ: -9, maxZ: -5 }; // the DJ and invited guests only
+const VIP = { minX: 3, maxX: 13.5, minZ: -15.5, maxZ: -10.8 }; // green room behind the back wall
+const DOOR = { minX: 7.4, maxX: 8.6, minZ: -11, maxZ: -8.9 }; // doorway from the club into the green room
 const DANCES = ['none', 'bounce', 'spin', 'sway', 'jump'];
 const EMOTES = ['🔥', '❤️', '🙌', '😂', '🎉', '💯', '👏', '🕺'];
 
@@ -42,6 +44,8 @@ const server = http.createServer((req, res) => {
       emotes: EMOTES,
       room: ROOM,
       stage: STAGE,
+      vip: VIP,
+      door: DOOR,
     });
   }
   if (url.pathname === '/health') return sendJson(res, { ok: true, players: players.size });
@@ -92,17 +96,20 @@ async function whoIs(token) {
 // ---- Club state ----
 const players = new Map(); // id -> player
 let nextId = 1;
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const num = (v, d = 0) => (Number.isFinite(v) ? v : d);
-const cleanColor = (c) => (/^#[0-9a-f]{6}$/i.test(c) ? c : '#7c5cff');
 
-function keepOffStage(p) {
-  if (p.isDj) return;
-  if (p.x > STAGE.minX - 0.5 && p.x < STAGE.maxX + 0.5 && p.z < STAGE.maxZ + 0.5) p.z = STAGE.maxZ + 0.5;
+// Same rules as canStand() in public/club.js.
+const inBox = (b, x, z) => x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ;
+function canStand(x, z, p) {
+  const inMain = inBox(ROOM, x, z);
+  if (inMain && x > STAGE.minX - 0.5 && x < STAGE.maxX + 0.5 && z < STAGE.maxZ + 0.5) return p.stage;
+  if (inMain) return true;
+  if (inBox(DOOR, x, z) || inBox(VIP, x, z)) return p.vip;
+  return false;
 }
 
 function publicInfo(p) {
-  return { id: p.id, name: p.name, color: p.color, isDj: p.isDj, x: p.x, z: p.z, ry: p.ry, dance: p.dance };
+  return { id: p.id, name: p.name, isDj: p.isDj, stage: p.stage, vip: p.vip, x: p.x, z: p.z, ry: p.ry, dance: p.dance };
 }
 
 function broadcast(msg, except) {
@@ -154,7 +161,7 @@ wss.on('connection', (ws) => {
       const isDj = testDj || (!!login && login === TWITCH_CHANNEL);
       player = {
         id: nextId++, ws, login, name, isDj,
-        color: cleanColor(m.color),
+        stage: isDj, vip: isDj,
         x: isDj ? 0 : (Math.random() - 0.5) * 16,
         z: isDj ? -7 : 4 + Math.random() * 7,
         ry: isDj ? 0 : Math.PI, dance: 'none', moved: true,
@@ -168,11 +175,13 @@ wss.on('connection', (ws) => {
     if (!player) return;
 
     if (m.t === 'move') {
-      // Trust the browser's position but keep it inside the room and off the stage.
-      player.x = clamp(num(m.x, player.x), ROOM.minX, ROOM.maxX);
-      player.z = clamp(num(m.z, player.z), ROOM.minZ, ROOM.maxZ);
+      // Trust the browser's position, but only where this person is allowed to stand.
+      const x = num(m.x, player.x), z = num(m.z, player.z);
+      if (Math.hypot(x - player.x, z - player.z) > 3) return; // no teleporting
+      if (canStand(x, z, player)) { player.x = x; player.z = z; }
+      else if (canStand(x, player.z, player)) player.x = x;
+      else if (canStand(player.x, z, player)) player.z = z;
       player.ry = num(m.ry, player.ry);
-      keepOffStage(player);
       player.moved = true;
     } else if (m.t === 'dance' && DANCES.includes(m.d)) {
       player.dance = m.d;
@@ -182,9 +191,19 @@ wss.on('connection', (ws) => {
       if (now - (player.lastEmote || 0) < 300) return;
       player.lastEmote = now;
       broadcast({ t: 'emote', id: player.id, e: m.e });
-    } else if (m.t === 'color') {
-      player.color = cleanColor(m.color);
-      broadcast({ t: 'color', id: player.id, color: player.color });
+    } else if (m.t === 'grant' && player.isDj && (m.perm === 'stage' || m.perm === 'vip')) {
+      // The DJ invites someone on stage / into the green room, or takes it back.
+      const target = players.get(m.id);
+      if (!target || target.isDj) return;
+      target[m.perm] = !!m.on;
+      broadcast({ t: 'perms', id: target.id, stage: target.stage, vip: target.vip, perm: m.perm, on: !!m.on });
+      if (!canStand(target.x, target.z, target)) {
+        // Walk them back out to the dance floor.
+        target.x = (Math.random() - 0.5) * 8;
+        target.z = 2 + Math.random() * 4;
+        target.moved = true;
+        if (target.ws.readyState === 1) target.ws.send(JSON.stringify({ t: 'tp', x: target.x, z: target.z }));
+      }
     }
   });
 

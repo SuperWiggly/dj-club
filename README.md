@@ -7,7 +7,11 @@ A 3D virtual club that runs in the browser. Viewers click a link in Twitch chat,
 - Dances: Stand, Bounce, Spin, Sway, Jump (keys 1-5).
 - Emotes float above your head: 🔥 ❤️ 🙌 😂 🎉 💯 👏 🕺 (keys Q E R T Y U I O).
 - Up to 100 people at once (change with `MAX_PLAYERS`).
-- When you log in with the Twitch account that matches `TWITCH_CHANNEL`, you appear behind the booth wearing headphones, with a gold name. Nobody else can stand on the stage.
+- When you log in with the Twitch account that matches `TWITCH_CHANNEL`, you appear behind the booth wearing headphones, with a red-outlined name.
+- Only the DJ and people the DJ invites can stand on the stage.
+- Behind the back wall is a green room / VIP lounge, through the door to the right of the screen. Only people the DJ lets in can enter.
+- **DJ tools:** tap anyone to invite them on stage or into the green room (or take it back), or press **Crowd** for a searchable list of everyone. Access lasts until they leave.
+- Look: dark Y2K / cyber sigilism. Everyone is black chrome for now; colors and effects are meant to be unlocked later.
 
 ## Settings
 
@@ -62,6 +66,12 @@ To see what a raid looks like, run this in a second window. It adds 60 fake view
 
 ```
 node test/bots.js 60
+```
+
+To check that the stage and green room rules hold (start the server with `TEST_DJ_NAME=dj` first):
+
+```
+node test/rules.js
 ```
 
 ## How it works
