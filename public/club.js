@@ -278,16 +278,24 @@ for (const [w, h, x, y] of [
 }
 
 let twitchPlayer = null;
-if (config.channel && window.Twitch?.Player) {
-  screenEl.textContent = '';
-  twitchPlayer = new Twitch.Player('twitchPlayer', {
-    channel: config.channel,
-    parent: [location.hostname],
-    width: PX_W, height: PX_H,
-    muted: true, autoplay: true,
-  });
-} else if (config.channel) {
-  screenEl.textContent = "Couldn't load the stream. Watch on twitch.tv/" + config.channel;
+// Called after the first frame, once the screen element is on the page.
+// If Twitch fails to load, the club still works; only the screen stays empty.
+function startTwitchPlayer() {
+  if (!config.channel) return;
+  try {
+    if (!window.Twitch?.Player) throw new Error('Twitch player script did not load');
+    screenEl.textContent = '';
+    twitchPlayer = new Twitch.Player(screenEl.id, {
+      channel: config.channel,
+      parent: [location.hostname],
+      width: PX_W, height: PX_H,
+      muted: true, autoplay: true,
+    });
+  } catch (err) {
+    console.error(err);
+    twitchPlayer = null;
+    screenEl.textContent = "Couldn't load the stream. Watch on twitch.tv/" + config.channel;
+  }
 }
 let soundOn = false;
 $('sound').onclick = () => {
@@ -704,6 +712,7 @@ function frame() {
   requestAnimationFrame(frame);
 }
 frame();
+startTwitchPlayer();
 
 // Logged in already (came back from Twitch, or refreshed the page)? Join straight away.
 const savedToken = store.get(TOKEN_KEY, sessionStorage);
