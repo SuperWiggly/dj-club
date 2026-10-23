@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 const $ = (id) => document.getElementById(id);
@@ -135,20 +134,17 @@ const canvas = $('scene');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setClearColor(0x000000, 0);
-const cssRenderer = new CSS3DRenderer({ element: $('css3d') });
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0x030304, 18, 45);
 // A soft studio reflection so black chrome actually looks like chrome.
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-const cssScene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
 
 function resize() {
   const w = innerWidth, h = innerHeight;
   renderer.setSize(w, h, false);
-  cssRenderer.setSize(w, h);
   camera.aspect = w / h;
   camera.fov = w < h ? 75 : 60;
   camera.updateProjectionMatrix();
@@ -385,24 +381,18 @@ const mixer = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.06, 0.7), blackChrome)
 mixer.position.set(0, 1.13, 0);
 booth.add(mixer);
 
-// ---- Big screen behind the booth showing the Twitch stream.
-// The video is a real web page placed in 3D; the 3D scene leaves a see-through hole for it.
-const SCREEN_W = 12, SCREEN_H = 6.75, SCREEN_Y = 5, SCREEN_Z = BACK_Z + 0.1;
-const PX_W = 1280, PX_H = 720;
-const screenEl = document.createElement('div');
-screenEl.id = 'twitchPlayer';
-screenEl.style.cssText = `width:${PX_W}px;height:${PX_H}px;background:#000;display:grid;place-items:center;color:#8b8f99;font:600 42px ${FONT};`;
-screenEl.textContent = config.channel ? 'Loading stream…' : 'Stream channel not set up yet';
-const screenObj = new CSS3DObject(screenEl);
-screenObj.position.set(0, SCREEN_Y, SCREEN_Z);
-screenObj.scale.setScalar(SCREEN_W / PX_W);
-cssScene.add(screenObj);
-const hole = new THREE.Mesh(
-  new THREE.PlaneGeometry(SCREEN_W, SCREEN_H),
-  new THREE.MeshBasicMaterial({ color: 0x000000, opacity: 0, blending: THREE.NoBlending }),
-);
-hole.position.copy(screenObj.position);
-scene.add(hole);
+// ---- Big screen behind the booth.
+// Twitch only plays its player when it's flat on the page and not covered, so the stream itself
+// plays in a corner window (see #player), and this screen shows live visuals instead.
+const SCREEN_W = 12, SCREEN_H = 6.75, SCREEN_Y = 5.5, SCREEN_Z = BACK_Z + 0.05;
+const screenCanvas = document.createElement('canvas');
+screenCanvas.width = 1024; screenCanvas.height = 576;
+const screenCtx = screenCanvas.getContext('2d');
+const screenTex = canvasTexture(screenCanvas);
+const screenSigil = sigilCanvas(77, '#ffffff', 512);
+const screen = new THREE.Mesh(new THREE.PlaneGeometry(SCREEN_W, SCREEN_H), new THREE.MeshBasicMaterial({ map: screenTex, fog: false }));
+screen.position.set(0, SCREEN_Y, SCREEN_Z);
+scene.add(screen);
 const frameMat = new THREE.MeshStandardMaterial({ color: 0xc8ccd6, metalness: 1, roughness: 0.15 });
 for (const [w, h, x, y] of [
   [SCREEN_W + 0.16, 0.08, 0, SCREEN_H / 2 + 0.04], [SCREEN_W + 0.16, 0.08, 0, -SCREEN_H / 2 - 0.04],
@@ -410,37 +400,100 @@ for (const [w, h, x, y] of [
 ]) {
   box(w, h, 0.05, x, SCREEN_Y + y, SCREEN_Z + 0.01, frameMat);
 }
+let streamLive = false;
+function drawScreen(t, pulse) {
+  const c = screenCtx, w = screenCanvas.width, h = screenCanvas.height;
+  c.fillStyle = '#030304';
+  c.fillRect(0, 0, w, h);
+  // Spinning sigil that kicks on the beat
+  c.save();
+  c.translate(w / 2, h / 2);
+  c.rotate(Math.sin(t * 0.3) * 0.25);
+  const s = 1.05 + pulse * 0.08;
+  c.scale(s, s);
+  c.globalAlpha = 0.35 + pulse * 0.35;
+  c.drawImage(screenSigil, -256, -256);
+  c.restore();
+  c.globalAlpha = 1;
+  // Channel name and live status
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  c.fillStyle = '#e9ecf3';
+  c.font = `700 72px ${FONT}`;
+  c.fillText('SUPER LONER CLUB', w / 2, h / 2 + 140);
+  if (config.channel) {
+    c.font = `600 30px ${FONT}`;
+    c.fillStyle = '#8b8f99';
+    c.fillText(`twitch.tv/${config.channel}`, w / 2, h / 2 + 200);
+  }
+  c.font = `700 34px ${FONT}`;
+  if (streamLive) {
+    c.fillStyle = `rgba(255,42,77,${0.6 + pulse * 0.4})`;
+    c.fillText('●  LIVE', w / 2, h / 2 - 180);
+  } else {
+    c.fillStyle = '#8b8f99';
+    c.fillText('OFFLINE', w / 2, h / 2 - 180);
+  }
+  // Scanlines
+  c.fillStyle = 'rgba(255,255,255,0.03)';
+  for (let y = 0; y < h; y += 4) c.fillRect(0, y, w, 1);
+  screenTex.needsUpdate = true;
+}
 
+// ---- The stream: a flat Twitch player in the corner of the screen
 let twitchPlayer = null;
-// Called after the first frame, once the screen element is on the page.
-// If Twitch fails to load, the club still works; only the screen stays empty.
 function startTwitchPlayer() {
   if (!config.channel) return;
   try {
     if (!window.Twitch?.Player) throw new Error('Twitch player script did not load');
-    screenEl.textContent = '';
-    twitchPlayer = new Twitch.Player(screenEl.id, {
+    twitchPlayer = new Twitch.Player('twitchPlayer', {
       channel: config.channel,
       parent: [location.hostname],
-      width: PX_W, height: PX_H,
+      width: '100%', height: '100%',
       muted: true, autoplay: true,
     });
+    twitchPlayer.addEventListener(Twitch.Player.ONLINE, () => (streamLive = true));
+    twitchPlayer.addEventListener(Twitch.Player.OFFLINE, () => (streamLive = false));
   } catch (err) {
     console.error(err);
     twitchPlayer = null;
-    screenEl.textContent = "Couldn't load the stream. Watch on twitch.tv/" + config.channel;
+    $('twitchPlayer').textContent = "Couldn't load the stream. Watch on twitch.tv/" + config.channel;
   }
 }
-let soundOn = false;
-$('sound').onclick = () => {
-  if (!twitchPlayer) return;
-  soundOn = !soundOn;
-  twitchPlayer.setMuted(!soundOn);
-  if (soundOn) { twitchPlayer.setVolume(Number($('volume').value)); twitchPlayer.play(); }
-  $('sound').textContent = soundOn ? '🔊 Sound on' : '🔇 Tap for sound';
-};
-$('volume').oninput = () => twitchPlayer?.setVolume(Number($('volume').value));
-if (!config.channel) $('sound').hidden = $('volume').hidden = true;
+if (!config.channel) $('player').hidden = true;
+
+// Every frame, put the flat player exactly where the 3D screen appears on your screen.
+// Twitch won't play a tilted player, so it moves and resizes but doesn't take on perspective.
+const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([x, y]) =>
+  new THREE.Vector3(x * SCREEN_W / 2, SCREEN_Y + y * SCREEN_H / 2, SCREEN_Z));
+const projected = new THREE.Vector3();
+let lastRect = '';
+function placePlayer() {
+  const el = $('player');
+  if (!twitchPlayer || !me || inGreenRoom(local.z)) { el.classList.remove('on'); return; }
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, behind = false;
+  for (const c of corners) {
+    projected.copy(c).project(camera);
+    if (projected.z > 1) behind = true;
+    const x = (projected.x + 1) / 2 * innerWidth, y = (1 - projected.y) / 2 * innerHeight;
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+  }
+  // Facing away from the screen, or it's barely on screen: hide it (the 3D screen shows visuals instead).
+  const visibleW = Math.min(maxX, innerWidth) - Math.max(minX, 0);
+  const visibleH = Math.min(maxY, innerHeight) - Math.max(minY, 0);
+  if (behind || visibleW < 120 || visibleH < 70) { el.classList.remove('on'); return; }
+  // Keep the 16:9 shape, centered on where the screen is.
+  const w = Math.max(maxX - minX, ((maxY - minY) * 16) / 9);
+  const h = (w * 9) / 16;
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  const rect = `${Math.round(cx - w / 2)},${Math.round(cy - h / 2)},${Math.round(w)},${Math.round(h)}`;
+  if (rect !== lastRect) {
+    lastRect = rect;
+    const [l, t, rw, rh] = rect.split(',');
+    Object.assign(el.style, { left: l + 'px', top: t + 'px', width: rw + 'px', height: rh + 'px' });
+  }
+  el.classList.add('on');
+}
 
 // ---- Green room / VIP lounge behind the back wall
 {
@@ -759,7 +812,7 @@ function renderCrowd() {
 // ---------------------------------------------------------------- controls
 const local = { x: 0, z: 8, ry: Math.PI };
 let target = null; // where a tap/click asked us to walk
-let camYaw = 0, camPitch = 0.38, camDist = 7.5;
+let camYaw = 0, camPitch = 0.26, camDist = 7.5;
 const keys = new Set();
 const joy = { x: 0, y: 0 };
 
@@ -920,6 +973,7 @@ const tileColor = new THREE.Color();
 const palette = [0xff2bd6, 0x29e7ff, 0x9146ff, 0x3dff8b, 0xffd12b].map((c) => new THREE.Color(c));
 const camTarget = new THREE.Vector3(0, 1.4, 8);
 const followPoint = new THREE.Vector3();
+let frameNo = 0;
 
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.1);
@@ -953,12 +1007,13 @@ function frame() {
     l.intensity = 15 + pulse * 35;
   });
   decks.forEach((d) => (d.rotation.y += dt * 3.5));
+  if ((frameNo++ & 1) === 0) drawScreen(t, pulse);
   boothStripMat.color.setRGB(0.6 + pulse * 0.4, 0.08 + pulse * 0.1, 0.18 + pulse * 0.12);
   ropeMat.opacity = me?.vip ? 0.15 : 0.55 + pulse * 0.35;
 
   // Camera follows you (or slowly circles the room on the login screen).
   if (me) {
-    followPoint.set(local.x, 1.4 + stageHeightAt(local.x, local.z), local.z);
+    followPoint.set(local.x, 2.3 + stageHeightAt(local.x, local.z), local.z);
     camTarget.lerp(followPoint, 1 - Math.exp(-dt * 8));
   } else {
     camYaw = Math.sin(t * 0.1) * 0.6;
@@ -977,9 +1032,10 @@ function frame() {
   camera.position.z = THREE.MathUtils.clamp(camera.position.z, inside.minZ + pad, inside.maxZ - pad);
   camera.position.y = Math.min(camera.position.y, (me && inGreenRoom(local.z) ? VIP_H : H) - 0.4);
   camera.lookAt(camTarget);
+  camera.updateMatrixWorld();
+  placePlayer();
 
   renderer.render(scene, camera);
-  cssRenderer.render(cssScene, camera);
   requestAnimationFrame(frame);
 }
 frame();
